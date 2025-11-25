@@ -1,32 +1,35 @@
 from fastapi import FastAPI
-from app.routers import auth, ml
 from fastapi.middleware.cors import CORSMiddleware
+from app.routers import ml
+import os
 
-# Setup Aplikasi
+# --- SETUP APLIKASI ---
 app = FastAPI(
-    title="StatCorr API (Modular)",
-    description="Backend Terstruktur dengan Folder",
-    version="2.1.0"
+    title="StatCorr ML Engine",
+    description="Microservice khusus untuk kalkulasi statistik & machine learning",
+    version="3.0.0"
 )
-origins = [
-    "http://localhost:3000",           # Untuk testing lokal
-    "https://statcorr.vercel.app",     # (Contoh) Domain frontend kamu nanti
-    "*"                                # (Opsional) Bolehkan semua domain (untuk development)
-]
+
+# --- KONFIGURASI CORS ---
+# Agar bisa diakses dari frontend mana saja
+origins = ["*"] 
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Root Endpoint
+# --- ROUTER ---
 @app.get("/")
 def read_root():
-    return {"status": "StatCorr API is running modularly!"}
+    return {
+        "status": "Online",
+        "service": "StatCorr ML Engine",
+        "message": "Send POST request to /analyze/correlation with file_url"
+    }
 
-# Mendaftarkan Router (Menempelkan fitur Auth dan ML ke aplikasi utama)
-app.include_router(auth.router)
+# Kita hanya pasang satu router: ML
 app.include_router(ml.router)

@@ -3,7 +3,8 @@ uvicorn
 pandas
 numpy
 scikit-learn
+scipy
 python-multipart
 pydantic
-bcrypt
 requests
+openpyxl
