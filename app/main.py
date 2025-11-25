@@ -8,6 +8,11 @@ app = FastAPI(
     description="Backend Terstruktur dengan Folder",
     version="2.1.0"
 )
+origins = [
+    "http://localhost:3000",           # Untuk testing lokal
+    "https://statcorr.vercel.app",     # (Contoh) Domain frontend kamu nanti
+    "*"                                # (Opsional) Bolehkan semua domain (untuk development)
+]
 
 app.add_middleware(
     CORSMiddleware,

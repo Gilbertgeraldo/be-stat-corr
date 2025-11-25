@@ -1,0 +1,13 @@
+fastapi
+uvicorn
+supabase
+pandas
+numpy
+matplotlib
+seaborn
+scipy
+python-multipart
+pydantic
+bcrypt
+openpyxl
+requests
