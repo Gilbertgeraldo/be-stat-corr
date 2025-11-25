@@ -1,7 +1,5 @@
+# app/routers/ml.py - Optimized untuk Vercel
 from fastapi import APIRouter, HTTPException, File, UploadFile
-from fastapi.middleware.cors import CORSMiddleware
-from app.models import AnalysisRequest
-import requests
 import pandas as pd
 import numpy as np
 import io
@@ -10,72 +8,14 @@ import traceback
 
 router = APIRouter(tags=["Machine Learning"])
 
-# Pastikan ini ada di main.py/app.py Anda:
-# app.add_middleware(
-#     CORSMiddleware,
-#     allow_origins=["*"],
-#     allow_credentials=True,
-#     allow_methods=["*"],
-#     allow_headers=["*"],
-# )
-
-@router.post("/analyze/correlation")
-def analyze_correlation(request: AnalysisRequest):
-    """
-    Analisis korelasi dari file Excel/CSV yang di-upload via URL
-    """
-    try:
-        # Download File
-        response = requests.get(request.file_url, timeout=30)
-        if response.status_code != 200:
-            raise HTTPException(status_code=400, detail="Gagal mendownload file")
-        
-        # Deteksi format file (Excel atau CSV)
-        if request.file_url.endswith('.xlsx') or request.file_url.endswith('.xls'):
-            df = pd.read_excel(io.BytesIO(response.content))
-        else:
-            df = pd.read_csv(io.StringIO(response.text))
-        
-        # Bersihkan data
-        df = df.dropna(how='all')
-        numeric_df = df.select_dtypes(include=['number'])
-        
-        if numeric_df.empty:
-            raise HTTPException(status_code=400, detail="Tidak ada kolom angka dalam file")
-
-        # Hitung Korelasi Pearson
-        correlation_matrix = numeric_df.corr(method='pearson')
-        
-        # Hitung nilai p-value untuk signifikansi
-        p_values = calculate_p_values(numeric_df)
-
-        # Identifikasi korelasi kuat (threshold: |r| > 0.7)
-        strong_correlations = extract_strong_correlations(
-            correlation_matrix, 
-            p_values,
-            threshold=0.7
-        )
-
-        return {
-            "status": "success",
-            "total_rows": len(df),
-            "numeric_columns": list(numeric_df.columns),
-            "correlation_matrix": correlation_matrix.to_dict(),
-            "p_values": p_values.to_dict(),
-            "strong_correlations": strong_correlations,
-            "summary_stats": numeric_df.describe().to_dict()
-        }
-
-    except HTTPException as e:
-        raise e
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
-
+# Max file size: 5MB untuk Vercel
+MAX_FILE_SIZE = 5 * 1024 * 1024
 
 @router.post("/analyze/correlation-upload")
 async def analyze_correlation_upload(file: UploadFile = File(...)):
     """
     Analisis korelasi dari file yang di-upload langsung
+    Optimized untuk Vercel serverless
     """
     try:
         # Validasi tipe file
@@ -94,6 +34,13 @@ async def analyze_correlation_upload(file: UploadFile = File(...)):
         
         # Baca file yang diupload
         contents = await file.read()
+        
+        # Validasi ukuran file
+        if len(contents) > MAX_FILE_SIZE:
+            raise HTTPException(
+                status_code=413,
+                detail=f"File terlalu besar. Max: 5MB"
+            )
         
         if not contents:
             raise HTTPException(status_code=400, detail="File kosong atau tidak terbaca")
@@ -117,6 +64,10 @@ async def analyze_correlation_upload(file: UploadFile = File(...)):
         # Bersihkan data - hapus baris yang seluruhnya kosong
         df = df.dropna(how='all')
         
+        # Limit rows untuk performa Vercel (max 1000 rows)
+        if len(df) > 1000:
+            df = df.head(1000)
+        
         # Ambil hanya kolom numerik
         numeric_df = df.select_dtypes(include=['number'])
         
@@ -125,11 +76,14 @@ async def analyze_correlation_upload(file: UploadFile = File(...)):
                 status_code=400, 
                 detail=f"Tidak ada kolom numerik dalam file. Kolom yang ada: {list(df.columns)}"
             )
+        
+        # Limit kolom untuk performa (max 20 kolom)
+        if len(numeric_df.columns) > 20:
+            numeric_df = numeric_df.iloc[:, :20]
 
-        # Hitung berbagai metrik korelasi
+        # Hitung korelasi Pearson (skip Spearman untuk hemat waktu)
         pearson_corr = numeric_df.corr(method='pearson')
-        spearman_corr = numeric_df.corr(method='spearman')
-        p_values = calculate_p_values(numeric_df)
+        p_values = calculate_p_values_fast(numeric_df)
         
         # Identifikasi korelasi kuat
         strong_correlations = extract_strong_correlations(
@@ -146,7 +100,6 @@ async def analyze_correlation_upload(file: UploadFile = File(...)):
             "numeric_columns": list(numeric_df.columns),
             "non_numeric_columns": [col for col in df.columns if col not in numeric_df.columns],
             "pearson_correlation": correlation_to_dict(pearson_corr),
-            "spearman_correlation": correlation_to_dict(spearman_corr),
             "p_values": p_values_to_dict(p_values),
             "strong_correlations": strong_correlations,
             "data_types": {col: str(dtype) for col, dtype in df.dtypes.items()},
@@ -194,16 +147,22 @@ def summary_stats_to_dict(stats_df):
     return result
 
 
-def calculate_p_values(df):
+def calculate_p_values_fast(df):
     """
-    Hitung p-value untuk setiap pasang kolom menggunakan Pearson correlation
+    Hitung p-value dengan optimasi untuk Vercel
+    Skip jika terlalu banyak kolom
     """
     columns = df.columns
-    p_values = pd.DataFrame(np.ones((len(columns), len(columns))), 
-                           columns=columns, index=columns)
+    max_cols = min(len(columns), 20)  # Limit ke 20 kolom
     
-    for i, col1 in enumerate(columns):
-        for j, col2 in enumerate(columns):
+    p_values = pd.DataFrame(
+        np.ones((max_cols, max_cols)), 
+        columns=columns[:max_cols], 
+        index=columns[:max_cols]
+    )
+    
+    for i, col1 in enumerate(columns[:max_cols]):
+        for j, col2 in enumerate(columns[:max_cols]):
             if i != j:
                 try:
                     _, p_val = pearsonr(df[col1].dropna(), df[col2].dropna())
@@ -254,7 +213,7 @@ def correlation_info():
     Informasi tentang analisis korelasi dan interpretasinya
     """
     return {
-        "info": "Analisis Korelasi Pearson & Spearman",
+        "info": "Analisis Korelasi Pearson",
         "interpretasi": {
             "1.0": "Korelasi sempurna positif",
             "0.7-0.99": "Korelasi sangat kuat positif",
