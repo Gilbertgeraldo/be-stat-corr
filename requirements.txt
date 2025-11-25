@@ -1,13 +1,9 @@
 fastapi
 uvicorn
-supabase
 pandas
 numpy
-matplotlib
-seaborn
-scipy
+scikit-learn
 python-multipart
 pydantic
 bcrypt
-openpyxl
 requests
