@@ -1,21 +1,18 @@
-# app/routers/ml.py - Optimized untuk Vercel
+# app/routers/ml.py - Ultra-lightweight untuk Vercel
 from fastapi import APIRouter, HTTPException, File, UploadFile
-import pandas as pd
-import numpy as np
+import json
+import csv
 import io
-from scipy.stats import pearsonr
-import traceback
+from math import sqrt
 
 router = APIRouter(tags=["Machine Learning"])
 
-# Max file size: 5MB untuk Vercel
-MAX_FILE_SIZE = 5 * 1024 * 1024
+MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB
 
 @router.post("/analyze/correlation-upload")
 async def analyze_correlation_upload(file: UploadFile = File(...)):
     """
-    Analisis korelasi dari file yang di-upload langsung
-    Optimized untuk Vercel serverless
+    Analisis korelasi TANPA pandas - Ultra lightweight untuk Vercel
     """
     try:
         # Validasi tipe file
@@ -29,13 +26,12 @@ async def analyze_correlation_upload(file: UploadFile = File(...)):
         if not file_ext:
             raise HTTPException(
                 status_code=400, 
-                detail=f"Format file tidak didukung. Gunakan: {', '.join(allowed_extensions)}"
+                detail=f"Format file tidak didukung. Gunakan: CSV atau Excel"
             )
         
-        # Baca file yang diupload
+        # Baca file
         contents = await file.read()
         
-        # Validasi ukuran file
         if len(contents) > MAX_FILE_SIZE:
             raise HTTPException(
                 status_code=413,
@@ -43,177 +39,280 @@ async def analyze_correlation_upload(file: UploadFile = File(...)):
             )
         
         if not contents:
-            raise HTTPException(status_code=400, detail="File kosong atau tidak terbaca")
+            raise HTTPException(status_code=400, detail="File kosong")
         
-        # Deteksi format dan baca file
+        # Parse file
         try:
-            if file_ext in ['.xlsx', '.xls']:
-                df = pd.read_excel(io.BytesIO(contents))
-            else:  # CSV
-                df = pd.read_csv(io.BytesIO(contents))
+            if file_ext == '.csv':
+                data = parse_csv(contents)
+            else:
+                data = parse_excel(contents)
         except Exception as e:
-            raise HTTPException(
-                status_code=400, 
-                detail=f"Gagal membaca file: {str(e)}"
-            )
+            raise HTTPException(status_code=400, detail=f"Gagal membaca file: {str(e)}")
         
-        # Validasi data
-        if df.empty:
+        if not data:
             raise HTTPException(status_code=400, detail="File tidak memiliki data")
         
-        # Bersihkan data - hapus baris yang seluruhnya kosong
-        df = df.dropna(how='all')
-        
-        # Limit rows untuk performa Vercel (max 1000 rows)
-        if len(df) > 1000:
-            df = df.head(1000)
-        
         # Ambil hanya kolom numerik
-        numeric_df = df.select_dtypes(include=['number'])
+        numeric_data = extract_numeric_columns(data)
         
-        if numeric_df.empty:
+        if not numeric_data:
             raise HTTPException(
                 status_code=400, 
-                detail=f"Tidak ada kolom numerik dalam file. Kolom yang ada: {list(df.columns)}"
+                detail=f"Tidak ada kolom numerik dalam file"
             )
         
-        # Limit kolom untuk performa (max 20 kolom)
-        if len(numeric_df.columns) > 20:
-            numeric_df = numeric_df.iloc[:, :20]
-
-        # Hitung korelasi Pearson (skip Spearman untuk hemat waktu)
-        pearson_corr = numeric_df.corr(method='pearson')
-        p_values = calculate_p_values_fast(numeric_df)
+        # Limit untuk Vercel
+        if len(numeric_data) > 1000:
+            numeric_data = numeric_data[:1000]
         
-        # Identifikasi korelasi kuat
-        strong_correlations = extract_strong_correlations(
-            pearson_corr, 
+        # Hitung korelasi
+        correlation_matrix = calculate_correlation_matrix(numeric_data)
+        p_values = calculate_p_values_simple(numeric_data)
+        
+        # Cari korelasi kuat
+        strong_correlations = find_strong_correlations(
+            numeric_data,
+            correlation_matrix,
             p_values,
             threshold=0.7
         )
-
+        
+        # Summary stats
+        summary_stats = calculate_summary_stats(numeric_data)
+        
         return {
             "status": "success",
             "file_name": file.filename,
-            "total_rows": len(df),
-            "total_columns": len(df.columns),
-            "numeric_columns": list(numeric_df.columns),
-            "non_numeric_columns": [col for col in df.columns if col not in numeric_df.columns],
-            "pearson_correlation": correlation_to_dict(pearson_corr),
-            "p_values": p_values_to_dict(p_values),
+            "total_rows": len(numeric_data),
+            "total_columns": len(numeric_data[0]) if numeric_data else 0,
+            "numeric_columns": list(numeric_data[0].keys()) if numeric_data else [],
+            "non_numeric_columns": [],
+            "pearson_correlation": correlation_matrix,
+            "p_values": p_values,
             "strong_correlations": strong_correlations,
-            "data_types": {col: str(dtype) for col, dtype in df.dtypes.items()},
-            "summary_stats": summary_stats_to_dict(numeric_df.describe())
+            "data_types": {},
+            "summary_stats": summary_stats
         }
 
     except HTTPException as e:
         raise e
     except Exception as e:
-        error_msg = f"Error: {str(e)}\n{traceback.format_exc()}"
-        print(error_msg)
-        raise HTTPException(status_code=500, detail=error_msg)
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
 
-def correlation_to_dict(corr_matrix):
-    """Konversi correlation matrix ke dictionary dengan handling NaN"""
-    result = {}
-    for col in corr_matrix.columns:
-        result[col] = {}
-        for idx in corr_matrix.index:
-            value = corr_matrix.loc[col, idx]
-            result[col][idx] = None if pd.isna(value) else round(float(value), 4)
-    return result
+def parse_csv(contents: bytes) -> list:
+    """Parse CSV file"""
+    try:
+        text = contents.decode('utf-8')
+        reader = csv.DictReader(io.StringIO(text))
+        return list(reader)
+    except:
+        text = contents.decode('latin-1')
+        reader = csv.DictReader(io.StringIO(text))
+        return list(reader)
 
 
-def p_values_to_dict(p_values):
-    """Konversi p-values ke dictionary dengan handling NaN"""
-    result = {}
-    for col in p_values.columns:
-        result[col] = {}
-        for idx in p_values.index:
-            value = p_values.loc[col, idx]
-            result[col][idx] = None if pd.isna(value) else round(float(value), 6)
-    return result
+def parse_excel(contents: bytes) -> list:
+    """Parse Excel file - minimal"""
+    try:
+        import openpyxl
+        wb = openpyxl.load_workbook(io.BytesIO(contents))
+        ws = wb.active
+        
+        # Ambil header
+        headers = []
+        for cell in ws[1]:
+            headers.append(cell.value)
+        
+        # Ambil data
+        data = []
+        for row in ws.iter_rows(min_row=2, values_only=True):
+            row_dict = {headers[i]: row[i] for i in range(len(headers))}
+            data.append(row_dict)
+        
+        return data
+    except:
+        raise Exception("Gagal membaca Excel file")
 
 
-def summary_stats_to_dict(stats_df):
-    """Konversi summary statistics ke dictionary dengan handling NaN"""
-    result = {}
-    for col in stats_df.columns:
-        result[col] = {}
-        for idx in stats_df.index:
-            value = stats_df.loc[idx, col]
-            result[col][idx] = None if pd.isna(value) else round(float(value), 2)
-    return result
-
-
-def calculate_p_values_fast(df):
-    """
-    Hitung p-value dengan optimasi untuk Vercel
-    Skip jika terlalu banyak kolom
-    """
-    columns = df.columns
-    max_cols = min(len(columns), 20)  # Limit ke 20 kolom
+def extract_numeric_columns(data: list) -> list:
+    """Extract hanya kolom numerik"""
+    if not data:
+        return []
     
-    p_values = pd.DataFrame(
-        np.ones((max_cols, max_cols)), 
-        columns=columns[:max_cols], 
-        index=columns[:max_cols]
-    )
+    numeric_data = []
+    numeric_keys = set()
     
-    for i, col1 in enumerate(columns[:max_cols]):
-        for j, col2 in enumerate(columns[:max_cols]):
-            if i != j:
-                try:
-                    _, p_val = pearsonr(df[col1].dropna(), df[col2].dropna())
-                    p_values.iloc[i, j] = p_val
-                except Exception as e:
-                    print(f"Error calculating p-value for {col1} vs {col2}: {e}")
-                    p_values.iloc[i, j] = np.nan
+    # Identifikasi kolom numerik
+    for row in data:
+        for key, value in row.items():
+            if value is None:
+                continue
+            try:
+                float(value)
+                numeric_keys.add(key)
+            except (ValueError, TypeError):
+                pass
+    
+    # Buat data dengan hanya kolom numerik
+    for row in data:
+        numeric_row = {}
+        for key in numeric_keys:
+            try:
+                numeric_row[key] = float(row.get(key, 0))
+            except:
+                numeric_row[key] = 0.0
+        if numeric_row:
+            numeric_data.append(numeric_row)
+    
+    return numeric_data
+
+
+def calculate_correlation_matrix(data: list) -> dict:
+    """Hitung correlation matrix tanpa pandas"""
+    if not data:
+        return {}
+    
+    keys = list(data[0].keys())
+    correlations = {}
+    
+    for key1 in keys:
+        correlations[key1] = {}
+        for key2 in keys:
+            if key1 == key2:
+                correlations[key1][key2] = 1.0
             else:
-                p_values.iloc[i, j] = 0
+                corr = calculate_pearson(data, key1, key2)
+                correlations[key1][key2] = round(corr, 4)
+    
+    return correlations
+
+
+def calculate_pearson(data: list, key1: str, key2: str) -> float:
+    """Hitung Pearson correlation"""
+    n = len(data)
+    if n < 2:
+        return 0.0
+    
+    x = [row[key1] for row in data]
+    y = [row[key2] for row in data]
+    
+    # Calculate means
+    mean_x = sum(x) / n
+    mean_y = sum(y) / n
+    
+    # Calculate covariance and standard deviations
+    cov = sum((x[i] - mean_x) * (y[i] - mean_y) for i in range(n)) / (n - 1)
+    std_x = sqrt(sum((xi - mean_x) ** 2 for xi in x) / (n - 1))
+    std_y = sqrt(sum((yi - mean_y) ** 2 for yi in y) / (n - 1))
+    
+    if std_x == 0 or std_y == 0:
+        return 0.0
+    
+    return cov / (std_x * std_y)
+
+
+def calculate_p_values_simple(data: list) -> dict:
+    """Estimasi p-value simple (tanpa scipy)"""
+    if not data:
+        return {}
+    
+    keys = list(data[0].keys())
+    p_values = {}
+    
+    for key1 in keys:
+        p_values[key1] = {}
+        for key2 in keys:
+            if key1 == key2:
+                p_values[key1][key2] = 0.0
+            else:
+                # Simple estimation - correlation strength
+                p_val = estimate_p_value_simple(data, key1, key2)
+                p_values[key1][key2] = round(p_val, 6)
     
     return p_values
 
 
-def extract_strong_correlations(corr_matrix, p_values, threshold=0.7, alpha=0.05):
-    """
-    Ekstrak korelasi yang kuat dan signifikan secara statistik
-    """
-    strong_corr = []
+def estimate_p_value_simple(data: list, key1: str, key2: str) -> float:
+    """Estimasi p-value simple berdasarkan correlation strength"""
+    n = len(data)
+    r = calculate_pearson(data, key1, key2)
     
-    for i in range(len(corr_matrix.columns)):
-        for j in range(i+1, len(corr_matrix.columns)):
-            col1 = corr_matrix.columns[i]
-            col2 = corr_matrix.columns[j]
-            corr_value = corr_matrix.iloc[i, j]
-            p_value = p_values.iloc[i, j]
+    # Simple t-test estimation
+    if n < 3:
+        return 1.0
+    
+    try:
+        t_stat = r * sqrt(n - 2) / sqrt(1 - r * r) if r * r < 1 else 0
+        # Rough approximation
+        p_value = 1.0 / (1.0 + abs(t_stat))
+        return min(p_value, 1.0)
+    except:
+        return 0.5
+
+
+def find_strong_correlations(data: list, corr_matrix: dict, p_values: dict, threshold: float = 0.7) -> list:
+    """Cari korelasi kuat"""
+    strong = []
+    keys = list(corr_matrix.keys())
+    
+    for i, key1 in enumerate(keys):
+        for key2 in keys[i+1:]:
+            corr_val = corr_matrix[key1][key2]
+            p_val = p_values[key1][key2]
             
-            # Skip jika ada NaN
-            if pd.isna(corr_value) or pd.isna(p_value):
-                continue
-            
-            # Hanya tampilkan jika |korelasi| > threshold dan p-value signifikan
-            if abs(corr_value) > threshold and p_value < alpha:
-                strong_corr.append({
-                    "column_1": str(col1),
-                    "column_2": str(col2),
-                    "correlation": round(float(corr_value), 4),
-                    "p_value": round(float(p_value), 6),
-                    "strength": "Sangat Kuat" if abs(corr_value) > 0.9 else "Kuat",
-                    "direction": "Positif" if corr_value > 0 else "Negatif"
+            if abs(corr_val) > threshold and p_val < 0.05:
+                strong.append({
+                    "column_1": key1,
+                    "column_2": key2,
+                    "correlation": corr_val,
+                    "p_value": p_val,
+                    "strength": "Sangat Kuat" if abs(corr_val) > 0.9 else "Kuat",
+                    "direction": "Positif" if corr_val > 0 else "Negatif"
                 })
     
-    return sorted(strong_corr, key=lambda x: abs(x["correlation"]), reverse=True)
+    return sorted(strong, key=lambda x: abs(x["correlation"]), reverse=True)
+
+
+def calculate_summary_stats(data: list) -> dict:
+    """Hitung summary statistics"""
+    if not data:
+        return {}
+    
+    stats = {}
+    keys = list(data[0].keys())
+    
+    for key in keys:
+        values = [row[key] for row in data if row[key] is not None]
+        
+        if not values:
+            continue
+        
+        n = len(values)
+        mean = sum(values) / n
+        var = sum((x - mean) ** 2 for x in values) / (n - 1) if n > 1 else 0
+        std = sqrt(var) if var >= 0 else 0
+        
+        stats[key] = {
+            "mean": round(mean, 2),
+            "std": round(std, 2),
+            "min": round(min(values), 2),
+            "max": round(max(values), 2),
+            "25%": round(sorted(values)[int(n * 0.25)], 2) if n > 0 else 0,
+            "50%": round(sorted(values)[int(n * 0.50)], 2) if n > 0 else 0,
+            "75%": round(sorted(values)[int(n * 0.75)], 2) if n > 0 else 0,
+            "count": n
+        }
+    
+    return stats
 
 
 @router.get("/analyze/correlation-info")
 def correlation_info():
-    """
-    Informasi tentang analisis korelasi dan interpretasinya
-    """
+    """Informasi tentang analisis korelasi"""
     return {
-        "info": "Analisis Korelasi Pearson",
+        "info": "Analisis Korelasi Pearson - Lightweight",
         "interpretasi": {
             "1.0": "Korelasi sempurna positif",
             "0.7-0.99": "Korelasi sangat kuat positif",
@@ -227,9 +326,5 @@ def correlation_info():
             "-0.69--0.5": "Korelasi kuat negatif",
             "-0.99--0.7": "Korelasi sangat kuat negatif",
             "-1.0": "Korelasi sempurna negatif"
-        },
-        "p_value_interpretation": {
-            "< 0.05": "Signifikan secara statistik (95% confidence)",
-            ">= 0.05": "Tidak signifikan secara statistik"
         }
     }
