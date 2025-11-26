@@ -1,9 +1,17 @@
 # api/index.py
+import sys
+import os
+
+# Fix: Set UTF-8 encoding untuk Windows
+if sys.platform == "win32":
+    os.environ["PYTHONIOENCODING"] = "utf-8"
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from mangum import Mangum
-import sys
-import os
 import traceback
 
 # Debug: Print working directory
@@ -15,9 +23,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 try:
     from app.routers import ml
-    print("✓ Successfully imported app.routers.ml")
+    print("[OK] Successfully imported app.routers.ml")
 except ImportError as e:
-    print(f"✗ Failed to import app.routers.ml: {e}")
+    print(f"[ERROR] Failed to import app.routers.ml: {e}")
     traceback.print_exc()
     raise
 

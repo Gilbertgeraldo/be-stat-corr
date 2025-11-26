@@ -2,7 +2,8 @@
   "buildCommand": "pip install -r requirements.txt",
   "installCommand": "pip install -r requirements.txt",
   "env": {
-    "PYTHONUNBUFFERED": "1"
+    "PYTHONUNBUFFERED": "1",
+    "PYTHONIOENCODING": "utf-8"
   },
   "routes": [
     {
