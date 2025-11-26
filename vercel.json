@@ -1,20 +1,11 @@
 {
-  "buildCommand": "pip install -r api/requirements.txt",
-  "functions": {
-    "api/index.py": {
-      "runtime": "python3.11",
-      "memory": 3008,
-      "maxDuration": 60,
-      "includeFiles": "app/**"
-    }
-  },
+  "buildCommand": "pip install -r requirements.txt",
+  
   "routes": [
     {
       "src": "/(.*)",
       "dest": "api/index.py"
     }
-  ],
-  "env": {
-    "PYTHONPATH": "/var/task"
-  }
+  ]
+  
 }
