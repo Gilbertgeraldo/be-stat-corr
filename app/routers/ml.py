@@ -21,7 +21,7 @@ async def analyze_correlation_upload(file: UploadFile = File(...)):
         for ext in allowed_extensions:
             if file.filename.lower().endswith(ext):
                 file_ext = ext
-                break
+                break   
         
         if not file_ext:
             raise HTTPException(
@@ -214,7 +214,6 @@ def calculate_pearson(data: list, key1: str, key2: str) -> float:
 
 
 def calculate_p_values_simple(data: list) -> dict:
-    """Estimasi p-value simple (tanpa scipy)"""
     if not data:
         return {}
     
@@ -227,7 +226,6 @@ def calculate_p_values_simple(data: list) -> dict:
             if key1 == key2:
                 p_values[key1][key2] = 0.0
             else:
-                # Simple estimation - correlation strength
                 p_val = estimate_p_value_simple(data, key1, key2)
                 p_values[key1][key2] = round(p_val, 6)
     
@@ -235,7 +233,6 @@ def calculate_p_values_simple(data: list) -> dict:
 
 
 def estimate_p_value_simple(data: list, key1: str, key2: str) -> float:
-    """Estimasi p-value simple berdasarkan correlation strength"""
     n = len(data)
     r = calculate_pearson(data, key1, key2)
     

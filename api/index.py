@@ -78,7 +78,7 @@ async def favicon():
 
 # Include router kalau ada
 if ml:
-    app.include_router(ml.router, prefix="/ml")
+    app.include_router(ml.router)  # Tanpa prefix, langsung /analyze/...
     print("[SUCCESS] ML router included")
 else:
     print("[WARNING] ML router not included - module import failed")
