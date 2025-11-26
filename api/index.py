@@ -4,11 +4,22 @@ from fastapi.middleware.cors import CORSMiddleware
 from mangum import Mangum
 import sys
 import os
+import traceback
+
+# Debug: Print working directory
+print(f"Working directory: {os.getcwd()}")
+print(f"Script directory: {os.path.dirname(os.path.abspath(__file__))}")
 
 # Add app directory to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app.routers import ml
+try:
+    from app.routers import ml
+    print("✓ Successfully imported app.routers.ml")
+except ImportError as e:
+    print(f"✗ Failed to import app.routers.ml: {e}")
+    traceback.print_exc()
+    raise
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -17,12 +28,10 @@ app = FastAPI(
     version="3.0.0"
 )
 
-# CORS Configuration untuk Vercel
-origins = ["*"]
-
+# CORS Configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -34,19 +43,15 @@ def read_root():
     return {
         "status": "Online",
         "service": "StatCorr ML Engine",
-        "version": "3.0.0",
-        "endpoint": "/analyze/correlation-upload"
+        "version": "3.0.0"
     }
 
 @app.get("/health")
 def health_check():
-    return {
-        "status": "healthy",
-        "service": "StatCorr ML Engine"
-    }
+    return {"status": "healthy"}
 
-# Include ML router
-app.include_router(ml.router)
+# Include router
+app.include_router(ml.router, prefix="/ml")
 
-# Mangum handler untuk Vercel
+# Handler untuk Vercel
 handler = Mangum(app, lifespan="off")
