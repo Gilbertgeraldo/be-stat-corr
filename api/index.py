@@ -10,6 +10,8 @@ if sys.platform == "win32":
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
 from fastapi import FastAPI
+
+from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 from mangum import Mangum
 import traceback
@@ -44,6 +46,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    """Silent response untuk favicon request"""
+    return Response(status_code=204)
 
 # Routes
 @app.get("/")
